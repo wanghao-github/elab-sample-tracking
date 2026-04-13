@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Summary Result</title>
+  <style>
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+
+    th, td {
+      border: 1px solid #ccc;
+      padding: 10px;
+      text-align: left;
+    }
+
+    th {
+      background-color: #f0f0f0;
+      cursor: pointer;
+      position: relative;
+    }
+
+    th::after {
+      content: " ⇅";
+      position: absolute;
+      right: 8px;
+      font-size: 12px;
+      color: #888;
+    }
+
+    th.asc::after {
+      content: " ▲";
+      color: #000;
+    }
+
+    th.desc::after {
+      content: " ▼";
+      color: #000;
+    }
+
+    .body-content, .qr-content {
+      display: none;
+      background: #fafafa;
+      padding: 10px;
+      border: 1px solid #ddd;
+      margin-top: 5px;
+    }
+
+    .toggle-btn {
+      background-color: #65c7f7;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      cursor: pointer;
+      border-radius: 5px;
+      margin-right: 5px;
+    }
+
+    .toggle-btn:hover {
+      background-color: #ff7eb3;
+    }
+  </style>
+</head>
+<body>
+
+{% if new_item_id %}
+<p style="color: green;">
+  ✅ Summary saved as item:
+  <a href="https://wanghao93.xyz/database.php?mode=view&id={{ new_item_id }}" target="_blank">
+    View entry {{ new_item_id }}
+  </a>
+</p>
+<div style="margin-top: 10px;">
+  <img src="{{ generate_qr_code('https://wanghao93.xyz/database.php?mode=view&id=' ~ new_item_id) }}"
+       alt="QR Code" width="150" height="150">
+</div>
+{% endif %}
+
+{% if rows %}
+<table id="result-table">
+  <thead>
+    <tr>
+      <th onclick="sortTable(0, this)">ID</th>
+      <th onclick="sortTable(1, this)">Sample-ID</th>
+      <th onclick="sortTable(2, this)">Title</th>
+      <th onclick="sortTable(3, this)">Created By</th>
+      <th onclick="sortTable(4, this)">Created At</th>
+      {% if rows[0].extra_info %}
+        {% for key in rows[0].extra_info.keys() %}
+          <th onclick="sortTable({{ loop.index + 4 }}, this)">{{ key }}</th>
+        {% endfor %}
+      {% endif %}
+      <th>Body</th>
+      <th>Link</th>
+      <th>QR Code</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in rows %}
+    <tr class="data-row">
+      <td>{{ row.id }}</td>
+      <td>{{ row.sample_id }}</td>
+      <td>{{ row.title }}</td>
+      <td>{{ row.fullname }}</td>
+      <td>{{ row.created_at }}</td>
+      {% if row.extra_info %}
+        {% for value in row.extra_info.values() %}
+          <td>{{ value }}</td>
+        {% endfor %}
+      {% endif %}
+      <td>
+        <button class="toggle-btn" onclick="toggleBody('body{{ row.id }}')">Show</button>
+      </td>
+      <td><a href="{{ row.link }}" target="_blank">🔗 Link</a></td>
+      <td>
+        <button class="toggle-btn" onclick="toggleQR('qr{{ row.id }}')">Show QR</button>
+      </td>
+    </tr>
+    <tr class="body-row" id="body{{ row.id }}" style="display:none;">
+      <td colspan="100%">
+        <div class="body-content">{{ row.body | safe }}</div>
+      </td>
+    </tr>
+    <tr class="qr-row" id="qr{{ row.id }}" style="display:none;">
+      <td colspan="100%">
+        <div class="qr-content"><img src="{{ row.qr_code | safe }}" alt="QR Code"></div>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No matching entries found.</p>
+{% endif %}
+
+<script>
+function toggleBody(id) {
+  const el = document.getElementById(id);
+  el.style.display = el.style.display === "none" ? "table-row" : "none";
+}
+
+function toggleQR(id) {
+  const el = document.getElementById(id);
+  el.style.display = el.style.display === "none" ? "table-row" : "none";
+}
+
+function sortTable(colIndex, thElement) {
+  const table = document.getElementById("result-table");
+  const tbody = table.querySelector("tbody");
+  const dataRows = Array.from(tbody.querySelectorAll("tr.data-row"));
+
+  const isAsc = !thElement.classList.contains("asc");
+  table.dataset.sortOrder = isAsc ? "asc" : "desc";
+
+  document.querySelectorAll("th").forEach(th => th.classList.remove("asc", "desc"));
+  thElement.classList.add(isAsc ? "asc" : "desc");
+
+  dataRows.sort((a, b) => {
+    const A = a.children[colIndex]?.innerText.trim() || "";
+    const B = b.children[colIndex]?.innerText.trim() || "";
+    return A.localeCompare(B, undefined, { numeric: true }) * (isAsc ? 1 : -1);
+  });
+
+  tbody.innerHTML = "";
+  for (const row of dataRows) {
+    const id = row.children[0].innerText.trim();
+    const bodyRow = document.getElementById("body" + id);
+    const qrRow = document.getElementById("qr" + id);
+    tbody.append(row);
+    if (bodyRow) tbody.append(bodyRow);
+    if (qrRow) tbody.append(qrRow);
+  }
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Sample ID Input</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #007BFF;
+      color: #fff;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    .header {
+      text-align: center;
+      margin-top: 60px;
+      margin-bottom: 30px;
+    }
+
+    .header img {
+      width: 200px;
+      height: auto;
+    }
+
+    .header h2 {
+      margin-top: 10px;
+      font-weight: normal;
+    }
+
+    .container {
+      background: rgba(0, 0, 0, 0.5);
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+      width: 400px;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin-bottom: 20px;
+    }
+
+    input[type="text"], input[type="password"] {
+      width: calc(100% - 20px);
+      padding: 10px;
+      margin: 10px 0;
+      border: none;
+      border-radius: 5px;
+      outline: none;
+    }
+
+    input[type="submit"] {
+      background: #65c7f7;
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+
+    input[type="submit"]:hover {
+      background: #ff7eb3;
+    }
+
+    .switch {
+      margin: 20px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 16px;
+      flex-wrap: wrap;
+    }
+
+    .switch-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #fff;
+      position: relative;
+    }
+
+    .switch-label input[type="checkbox"] {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: relative;
+      width: 50px;
+      height: 25px;
+      background: #ccc;
+      border-radius: 25px;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+
+    .slider:before {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 19px;
+      height: 19px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.3s ease;
+    }
+
+    input[type="checkbox"]:checked + .slider {
+      background: #65c7f7;
+    }
+
+    input[type="checkbox"]:checked + .slider:before {
+      transform: translateX(25px);
+    }
+
+    .radio-group {
+      display: flex;
+      justify-content: space-around;
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    .radio-group label {
+      color: #fff;
+      font-weight: normal;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .radio-group input[type="radio"] {
+      accent-color: #65c7f7;
+    }
+  </style>
+
+  <script>
+    window.onload = function () {
+      const urlParams = new URLSearchParams(window.location.search);
+      const sampleid = urlParams.get("sampleid");
+      const apikey = urlParams.get("apikey");
+      const type = urlParams.get("type");
+      const fulltext = urlParams.get("fulltext");
+      const auto = urlParams.get("auto");
+
+      if (sampleid) {
+        document.querySelector('input[name="sample_id"]').value = sampleid;
+      }
+      if (apikey) {
+        document.querySelector('input[name="api_key"]').value = apikey;
+      }
+      if (type) {
+        const radio = document.querySelector(`input[name="data_type"][value="${type}"]`);
+        if (radio) radio.checked = true;
+      }
+      if (fulltext === "true") {
+        document.querySelector('input[name="full_text_match"]').checked = true;
+      } else if (fulltext === "false") {
+        document.querySelector('input[name="full_text_match"]').checked = false;
+      }
+
+      if (auto === "1") {
+        document.querySelector("form").submit();
+      }
+    };
+  </script>
+</head>
+<body>
+  <div class="header">
+    <img src="https://doc.elabftw.net/_images/elabftw-logo.png" alt="eLabFTW Logo">
+    <h2>Sample Tracking</h2>
+  </div>
+
+  <div class="container">
+    <h1>Please enter your Sample ID</h1>
+    <form action="/process_input" method="post">
+      <input type="text" name="sample_id" placeholder="Enter your Sample ID" required>
+      <input type="text" name="api_key" placeholder="Enter your API Key" required>
+
+      <div class="switch">
+        <label class="switch-label">
+          <input type="checkbox" name="generate_summary">
+          <span class="slider"></span>
+          <span class="label-text">Generate Summary</span>
+        </label>
+      </div>
+
+      <div class="radio-group">
+        <label><input type="radio" name="data_type" value="item" checked> Items</label>
+        <label><input type="radio" name="data_type" value="experiment"> Experiments</label>
+      </div>
+
+      <div class="switch">
+        <label class="switch-label">
+          <input type="checkbox" name="full_text_match">
+          <span class="slider"></span>
+          <span class="label-text">Full Text Match</span>
+        </label>
+      </div>
+
+      <input type="submit" value="Submit">
+    </form>
+  </div>
+</body>
+</html>

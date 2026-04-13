@@ -1,0 +1,77 @@
+{% if new_item_id %}
+<p style="color: green;">
+    ✅ Summary has been saved as a new item:
+    <a href="https://wanghao93.xyz/database.php?mode=view&id={{ new_item_id }}" target="_blank">
+        View item {{ new_item_id }}
+    </a>
+</p>
+{% endif %}
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll("table.sortable th").forEach((header, index) => {
+        header.addEventListener("click", () => {
+            const table = header.closest("table");
+            const rows = Array.from(table.querySelectorAll("tr:nth-child(n+2)"));
+            const isAsc = !header.classList.contains("asc");
+
+            table.querySelectorAll("th").forEach(th => th.classList.remove("asc", "desc"));
+            header.classList.add(isAsc ? "asc" : "desc");
+
+            rows.sort((a, b) => {
+                const cellA = a.children[index].innerText.trim();
+                const cellB = b.children[index].innerText.trim();
+                const isNum = !isNaN(cellA) && !isNaN(cellB);
+
+                if (isNum) {
+                    return (parseFloat(cellA) - parseFloat(cellB)) * (isAsc ? 1 : -1);
+                } else {
+                    return cellA.localeCompare(cellB) * (isAsc ? 1 : -1);
+                }
+            });
+
+            rows.forEach(row => table.appendChild(row));
+        });
+    });
+});
+</script>
+
+{% if rows %}
+<table class="sortable" border="1" cellpadding="5" cellspacing="0">
+    <tr>
+        <th>Title</th>
+        <th>Full Name</th>
+        <th>Created Date</th>
+
+        {% if rows[0].extra_info %}
+            {% for key in rows[0].extra_info.keys() %}
+                {% if key != 'Temperature' %}
+                    <th>{{ key }}</th>
+                {% endif %}
+            {% endfor %}
+        {% endif %}
+
+        <th>Details Link</th>
+    </tr>
+
+    {% for row in rows %}
+    <tr>
+        <td>{{ row.title }}</td>
+        <td>{{ row.fullname }}</td>
+        <td>{{ row.created_at }}</td>
+
+        {% if row.extra_info %}
+            {% for key, value in row.extra_info.items() %}
+                {% if key != 'Temperature' %}
+                    <td>{{ value }}</td>
+                {% endif %}
+            {% endfor %}
+        {% endif %}
+
+        <td><a href="{{ row.link }}" target="_blank">{{ row.link }}</a></td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p>No matching entries found.</p>
+{% endif %}
