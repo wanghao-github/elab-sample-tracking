@@ -1,129 +1,324 @@
-# eLabFTW Sample Tracking Web App
+eLabFTW Sample Tracking
 
-A lightweight Flask-based web application for querying and summarizing eLabFTW items or experiments by Sample-ID, with optional summary generation and QR code support.
+A lightweight Flask-based web application for tracking sample provenance and collaboration history in eLabFTW.
 
-This repository also includes a utility script (elab_sync.py) for synchronizing data between two eLabFTW instances.
+The application allows users to search eLabFTW items or experiments using either a Sample ID or a contributor name, reconstruct the chronological history of a sample, and visualize interactions between samples, contributors, experiments, instruments, and metadata through an interactive graph interface.
 
----
+The repository also includes a synchronization utility (elab_sync.py) for transferring items and experiments between two eLabFTW instances.
 
-## Features
+⸻
 
-- Search eLabFTW items or experiments by Sample-ID  
-- Optional full-text matching (title + body)  
-- Extract structured metadata from extra_fields  
-- Display results in a sortable table  
-- Expandable body content and QR codes  
-- Generate a summary entry in eLabFTW  
-- Auto-fill and auto-submit via URL parameters  
-- Optional data sync tool between servers  
+Features
 
----
+Sample Tracking
 
-## Core Logic
+* Search eLabFTW records by:
+    * Sample ID
+    * Contributor name
+* Supports:
+    * Items
+    * Experiments
+* Optional:
+    * Full-text matching
+    * Summary generation inside eLabFTW
 
-### Data Flow
+⸻
 
-User Input → Flask → eLabFTW API → Filter → Render → (Optional) Save Summary
+Interactive Graph Visualization
 
-### Query Process
+The web interface generates an interactive graph similar to the Obsidian graph view.
 
-1. User inputs:
-   - Sample-ID  
-   - API key  
-   - Data type (items or experiments)  
-   - Matching mode  
+Sample View
 
-2. Backend:
-   - Fetches data from eLabFTW API  
-   - Extracts metadata (extra_fields)  
-   - Matches:
-     - default: Sample-ID prefix  
-     - optional: full text (title + body)  
+Displays:
 
-3. Output:
-   - Table view  
-   - Each row contains metadata, link, QR code, expandable body  
+* Sample nodes
+* Contributors
+* Experimental events
+* Instruments
+* Locations
+* Composition metadata
 
----
+Useful for reconstructing the lifecycle of a sample.
 
-## Project Structure
+⸻
+
+Contributor View
+
+Displays:
+
+* Contributors
+* Associated samples
+* Experimental records
+* Measurements and instruments
+
+Useful for exploring collaboration and sample exchange between groups.
+
+⸻
+
+Chronological Timeline
+
+Automatically reconstructs:
+
+* Sample history
+* Measurements
+* Processing steps
+* Contributor sequence
+
+Each event contains:
+
+* Timestamp
+* Contributor
+* Experiment type
+* Metadata
+* Direct link to eLabFTW
+
+⸻
+
+Dynamic Metadata Table
+
+The result table:
+
+* Automatically detects all custom extra_fields
+* Supports:
+    * Column filtering
+    * Search
+    * Sorting
+    * Expandable record body
+    * QR codes
+
+Default core fields:
+
+* Sample Type
+* Experiment Performed
+* Sample Composition
+* Instrument
+* Location
+
+⸻
+
+Summary Generation
+
+Optionally generate a new eLabFTW item containing:
+
+* Search result summary
+* Chronological sample history
+* Direct links to records
+
+⸻
+
+QR Code Support
+
+Each record includes a QR code pointing directly to the original eLabFTW entry.
+
+⸻
+
+System Architecture
+
+Data Flow
+
+Browser
+   ↓
+Flask / Gunicorn
+   ↓
+eLabFTW REST API
+   ↓
+Metadata extraction + filtering
+   ↓
+Timeline + graph generation
+   ↓
+Interactive HTML rendering
+
+⸻
+
+Project Structure
 
 elabftw_sample/
-├── app.py  
-├── elabftw_api.py  
-├── elab_sync.py  
-├── templates/  
-│   ├── sample_id.html  
-│   ├── result_table.html  
-│   └── summary_body.html  
+├── app.py
+├── elabftw_api.py
+├── elab_sync.py
+├── templates/
+│   ├── sample_id.html
+│   ├── result_table.html
+│   └── summary_body.html
+└── README.md
 
----
+⸻
 
-## Installation
+Installation
 
-### 1. Clone
+1. Clone Repository
 
-git clone <repo-url>  
-cd elabftw_sample  
+git clone <repo-url>
+cd elabftw_sample
 
-### 2. Create environment
+⸻
 
-python -m venv venv  
-source venv/bin/activate  
+2. Create Python Environment
 
-### 3. Install dependencies
+python3 -m venv .venv
+source .venv/bin/activate
 
-pip install flask elabapi_python qrcode pillow beautifulsoup4  
+⸻
 
----
+3. Install Dependencies
 
-## Running
+pip install -U pip wheel
+pip install \
+    flask \
+    gunicorn \
+    elabapi-python \
+    qrcode \
+    pillow \
+    beautifulsoup4 \
+    lxml
 
-python app.py  
+⸻
+
+Running Locally
+
+Development Mode
+
+python app.py
 
 Open:
 
-http://localhost:5000  
+http://127.0.0.1:5000
 
----
+⸻
 
-## Deployment
+Production Mode
 
-Typical setup:
+Recommended deployment:
 
-Nginx → Flask (port 5000)
+Nginx → Gunicorn → Flask
 
----
+Run Gunicorn manually:
 
-## Configuration
+gunicorn -w 2 -b 127.0.0.1:5000 app:app
 
-Update these values:
+⸻
 
-- API host in app.py  
-- base_url in app.py  
-- domain in templates  
-- API config in elabftw_api.py  
+Deployment Example
 
----
+systemd Service
 
-## Data Sync Tool
+Example:
 
-Set environment variables:
+[Unit]
+Description=Sample Tracking (Gunicorn)
+After=network.target
+[Service]
+User=hao
+WorkingDirectory=/home/hao/elabftw_sample
+Environment="PATH=/home/hao/elabftw_sample/.venv/bin"
+ExecStart=/home/hao/elabftw_sample/.venv/bin/gunicorn \
+  --workers 2 \
+  --bind 127.0.0.1:5000 \
+  --timeout 120 \
+  app:app
+Restart=always
+[Install]
+WantedBy=multi-user.target
 
-export ELAB_SOURCE_HOST="https://source/api/v2"  
-export ELAB_SOURCE_API_KEY="SOURCE_KEY"  
-export ELAB_TARGET_HOST="https://target/api/v2"  
-export ELAB_TARGET_API_KEY="TARGET_KEY"  
+⸻
 
-Run:
+Nginx Reverse Proxy
 
-python elab_sync.py  
+server {
+    listen 80;
+    server_name flair.mw.tu-darmstadt.de;
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
 
----
+⸻
 
-## Notes
+Configuration
 
-- Do not hardcode API keys  
-- SSL verification is disabled by default  
-- Designed for internal/research use  
+Update the following values according to your eLabFTW deployment.
 
+In app.py
+
+ELAB_API_HOST = "https://your-server/api/v2"
+ELAB_WEB_BASE = "https://your-server"
+
+⸻
+
+Data Synchronization Utility
+
+The repository includes elab_sync.py for synchronizing data between two eLabFTW instances.
+
+⸻
+
+Environment Variables
+
+export ELAB_SOURCE_HOST="https://source/api/v2"
+export ELAB_SOURCE_API_KEY="SOURCE_KEY"
+export ELAB_TARGET_HOST="https://target/api/v2"
+export ELAB_TARGET_API_KEY="TARGET_KEY"
+
+⸻
+
+Run Synchronization
+
+Sync all
+
+python elab_sync.py
+
+Sync only experiments
+
+python elab_sync.py --sync experiments
+
+Sync only items
+
+python elab_sync.py --sync items
+
+⸻
+
+Supported Metadata Extraction
+
+The application supports:
+
+* Standard eLabFTW metadata
+* Nested extra_fields
+* Grouped metadata structures
+* SSL metadata templates
+* User-defined custom fields
+
+⸻
+
+Security Notes
+
+* API keys should never be hardcoded
+* SSL verification is disabled by default for internal deployments
+* Designed primarily for internal laboratory and research environments
+
+⸻
+
+Intended Use Cases
+
+* Sample provenance tracking
+* Inter-group collaboration visualization
+* Experimental workflow reconstruction
+* FAIR data management support
+* Laboratory information tracing
+* Internal infrastructure demonstrations
+* Research data management workflows
+
+⸻
+
+Contributors
+
+Powered by the FLAIR project.
+
+Main contributors:
+
+* Hao Wang
+* Olaf Lindemann
+* Hongbin Zhang
