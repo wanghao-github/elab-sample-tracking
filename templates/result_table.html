@@ -2,32 +2,86 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Summary Result</title>
+  <title>Sample Tracking Result</title>
+
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
   <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 25px;
+      background: #eef1f5;
+      color: #222;
+    }
+
+    .section {
+      background: white;
+      padding: 18px;
+      margin-bottom: 24px;
+      border-radius: 12px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    }
+
+    h1, h2 {
+      margin-top: 0;
+    }
+
+    .nav-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 14px 0;
+    }
+
+    .nav-buttons a {
+      display: inline-block;
+      padding: 8px 12px;
+      background: #65c7f7;
+      color: white;
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .nav-buttons a:hover {
+      background: #ff7eb3;
+    }
+
+    #network {
+      height: 720px;
+      background: #e5e7eb;
+      border-radius: 16px;
+      border: 1px solid #d0d4dc;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
-      margin-top: 20px;
+      background: white;
+      margin-top: 15px;
+      font-size: 14px;
     }
 
     th, td {
       border: 1px solid #ccc;
-      padding: 10px;
+      padding: 9px;
       text-align: left;
+      vertical-align: top;
     }
 
     th {
-      background-color: #f0f0f0;
+      background: #f0f0f0;
       cursor: pointer;
-      position: relative;
+      position: sticky;
+      top: 0;
+      z-index: 2;
     }
 
     th::after {
       content: " ⇅";
-      position: absolute;
-      right: 8px;
-      font-size: 12px;
+      font-size: 11px;
       color: #888;
+      margin-left: 5px;
     }
 
     th.asc::after {
@@ -40,12 +94,43 @@
       color: #000;
     }
 
-    .body-content, .qr-content {
-      display: none;
-      background: #fafafa;
-      padding: 10px;
-      border: 1px solid #ddd;
-      margin-top: 5px;
+    .timeline {
+      border-left: 4px solid #65c7f7;
+      margin-left: 18px;
+      padding-left: 20px;
+    }
+
+    .timeline-event {
+      position: relative;
+      margin-bottom: 20px;
+    }
+
+    .timeline-event::before {
+      content: "";
+      position: absolute;
+      left: -31px;
+      top: 4px;
+      width: 14px;
+      height: 14px;
+      background: #65c7f7;
+      border-radius: 50%;
+      border: 2px solid white;
+    }
+
+    .timeline-date {
+      font-weight: bold;
+      color: #0056b3;
+    }
+
+    .timeline-title {
+      margin-top: 4px;
+      font-size: 16px;
+    }
+
+    .timeline-meta {
+      color: #555;
+      margin-top: 3px;
+      font-size: 14px;
     }
 
     .toggle-btn {
@@ -55,125 +140,471 @@
       padding: 5px 10px;
       cursor: pointer;
       border-radius: 5px;
-      margin-right: 5px;
     }
 
     .toggle-btn:hover {
       background-color: #ff7eb3;
     }
+
+    .body-box {
+      background: #fafafa;
+      padding: 12px;
+      max-height: 400px;
+      overflow: auto;
+    }
+
+    .field-selector {
+      margin: 12px 0 18px 0;
+      padding: 12px;
+      background: #f8fafc;
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+    }
+
+    .field-selector-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .field-selector button {
+      margin-left: 6px;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+
+    .field-search {
+      margin-top: 10px;
+      width: 320px;
+      max-width: 100%;
+      padding: 7px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+    }
+
+    .field-list {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      font-size: 14px;
+      max-height: 220px;
+      overflow: auto;
+      padding: 8px;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+    }
+
+    .field-item {
+      white-space: nowrap;
+    }
+
+    .table-wrapper {
+      overflow-x: auto;
+      max-width: 100%;
+    }
+
+    .meta-info {
+      color: #555;
+      font-size: 14px;
+    }
   </style>
 </head>
+
 <body>
 
+<div class="section">
+  <h1>Tracking Result: {{ query }}</h1>
+
+  <p>
+    Search mode: <strong>{{ search_mode }}</strong> |
+    Graph layout: <strong>{{ graph_center }}</strong> |
+    Records found: <strong>{{ rows|length }}</strong> |
+    Extra fields found: <strong>{{ extra_field_names|length }}</strong>
+  </p>
+
+  <div class="nav-buttons">
+    <a href="#transfer-graph">Sample / Contributor Transfer Graph</a>
+    <a href="#chronological-history">Chronological History</a>
+    <a href="#detailed-records">Detailed Records</a>
+  </div>
+
+  <p>
+    <a href="/">← Back to search</a>
+  </p>
+</div>
+
 {% if new_item_id %}
-<p style="color: green;">
-  ✅ Summary saved as item:
-  <a href="https://wanghao93.xyz/database.php?mode=view&id={{ new_item_id }}" target="_blank">
-    View entry {{ new_item_id }}
-  </a>
-</p>
-<div style="margin-top: 10px;">
-  <img src="{{ generate_qr_code('https://wanghao93.xyz/database.php?mode=view&id=' ~ new_item_id) }}"
-       alt="QR Code" width="150" height="150">
+<div class="section">
+  <p style="color: green;">
+    ✅ Summary saved as item:
+    <a href="https://wanghao93.xyz/database.php?mode=view&id={{ new_item_id }}" target="_blank">
+      View item {{ new_item_id }}
+    </a>
+  </p>
 </div>
 {% endif %}
 
 {% if rows %}
-<table id="result-table">
-  <thead>
-    <tr>
-      <th onclick="sortTable(0, this)">ID</th>
-      <th onclick="sortTable(1, this)">Sample-ID</th>
-      <th onclick="sortTable(2, this)">Title</th>
-      <th onclick="sortTable(3, this)">Created By</th>
-      <th onclick="sortTable(4, this)">Created At</th>
-      {% if rows[0].extra_info %}
-        {% for key in rows[0].extra_info.keys() %}
-          <th onclick="sortTable({{ loop.index + 4 }}, this)">{{ key }}</th>
-        {% endfor %}
-      {% endif %}
-      <th>Body</th>
-      <th>Link</th>
-      <th>QR Code</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for row in rows %}
-    <tr class="data-row">
-      <td>{{ row.id }}</td>
-      <td>{{ row.sample_id }}</td>
-      <td>{{ row.title }}</td>
-      <td>{{ row.fullname }}</td>
-      <td>{{ row.created_at }}</td>
-      {% if row.extra_info %}
-        {% for value in row.extra_info.values() %}
-          <td>{{ value }}</td>
-        {% endfor %}
-      {% endif %}
-      <td>
-        <button class="toggle-btn" onclick="toggleBody('body{{ row.id }}')">Show</button>
-      </td>
-      <td><a href="{{ row.link }}" target="_blank">🔗 Link</a></td>
-      <td>
-        <button class="toggle-btn" onclick="toggleQR('qr{{ row.id }}')">Show QR</button>
-      </td>
-    </tr>
-    <tr class="body-row" id="body{{ row.id }}" style="display:none;">
-      <td colspan="100%">
-        <div class="body-content">{{ row.body | safe }}</div>
-      </td>
-    </tr>
-    <tr class="qr-row" id="qr{{ row.id }}" style="display:none;">
-      <td colspan="100%">
-        <div class="qr-content"><img src="{{ row.qr_code | safe }}" alt="QR Code"></div>
-      </td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p>No matching entries found.</p>
-{% endif %}
+
+<div class="section" id="transfer-graph">
+  <h2>Sample / Contributor Transfer Graph</h2>
+  <p class="meta-info">
+    Double-click an event node to open the original eLabFTW record.
+  </p>
+  <div id="network"></div>
+</div>
+
+<div class="section" id="chronological-history">
+  <h2>Chronological History</h2>
+
+  <div class="timeline">
+    {% for row in timeline_rows %}
+    <div class="timeline-event">
+      <div class="timeline-date">{{ row.created_at }}</div>
+
+      <div class="timeline-title">
+        <a href="{{ row.link }}" target="_blank">{{ row.title }}</a>
+      </div>
+
+      <div class="timeline-meta">
+        <strong>Sample:</strong> {{ row.sample_id }} |
+        <strong>Contributor:</strong> {{ row.person }} |
+        <strong>Action:</strong> {{ row.action }}
+      </div>
+
+      <div class="timeline-meta">
+        {% if row.sample_type %}
+          <strong>Type:</strong> {{ row.sample_type }} |
+        {% endif %}
+        {% if row.composition %}
+          <strong>Composition:</strong> {{ row.composition }} |
+        {% endif %}
+        {% if row.project %}
+          <strong>Project:</strong> {{ row.project }}
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="section" id="detailed-records">
+  <h2>Detailed Records</h2>
+
+  <div class="field-selector">
+    <div class="field-selector-header">
+      <div>
+        <strong>Extra fields</strong>
+        <span class="meta-info">
+          Select which custom metadata columns should be displayed in the table.
+        </span>
+      </div>
+
+      <div>
+        <button type="button" onclick="selectAllExtraFields()">Select all</button>
+        <button type="button" onclick="clearAllExtraFields()">Clear all</button>
+        <button type="button" onclick="selectCommonExtraFields()">Core fields</button>
+      </div>
+    </div>
+
+    <input
+      class="field-search"
+      type="text"
+      id="field-search"
+      placeholder="Search extra fields..."
+      oninput="filterExtraFieldList()"
+    >
+
+    <div class="field-list" id="field-list">
+      {% for key in extra_field_names %}
+        <label class="field-item" data-field-name="{{ key | lower }}">
+          <input
+            type="checkbox"
+            class="extra-field-checkbox"
+            value="{{ key }}"
+            data-default-core="{% if key in ['Sample Type', 'Experiment Performed', 'Sample Composition', 'Instrument', 'Location'] %}true{% else %}false{
+% endif %}"
+            {% if key in ['Sample Type', 'Experiment Performed', 'Sample Composition', 'Instrument', 'Location'] %}checked{% endif %}
+            onchange="updateExtraFieldVisibility()"
+          >
+          {{ key }}
+        </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="table-wrapper">
+    <table id="result-table">
+      <thead>
+        <tr>
+          <th onclick="sortTable(0, this)">ID</th>
+          <th onclick="sortTable(1, this)">Sample ID</th>
+          <th onclick="sortTable(2, this)">Title</th>
+          <th onclick="sortTable(3, this)">Created By</th>
+          <th onclick="sortTable(4, this)">Created At</th>
+
+          {% for key in extra_field_names %}
+            <th class="extra-col" data-field="{{ key }}" onclick="sortTable({{ loop.index + 4 }}, this)">
+              {{ key }}
+            </th>
+          {% endfor %}
+
+          <th>Body</th>
+          <th>Link</th>
+          <th>QR Code</th>
+        </tr>
+      </thead>
+
+      <tbody>
+      {% for row in rows %}
+        <tr class="data-row">
+          <td>{{ row.id }}</td>
+          <td>{{ row.sample_id }}</td>
+          <td>{{ row.title }}</td>
+          <td>{{ row.fullname }}</td>
+          <td>{{ row.created_at }}</td>
+
+          {% for key in extra_field_names %}
+            <td class="extra-col" data-field="{{ key }}">
+              {{ (row.extra_info or {}).get(key, "") }}
+            </td>
+          {% endfor %}
+
+          <td>
+            <button class="toggle-btn" onclick="toggleBody('body{{ row.id }}')">Show</button>
+          </td>
+
+          <td>
+            <a href="{{ row.link }}" target="_blank">🔗 Link</a>
+          </td>
+
+          <td>
+            <button class="toggle-btn" onclick="toggleBody('qr{{ row.id }}')">Show QR</button>
+          </td>
+        </tr>
+
+        <tr id="body{{ row.id }}" class="detail-row" style="display:none;">
+          <td colspan="100%">
+            <div class="body-box">
+              {{ row.body | safe }}
+            </div>
+          </td>
+        </tr>
+
+        <tr id="qr{{ row.id }}" class="detail-row" style="display:none;">
+          <td colspan="100%">
+            <img src="{{ row.qr_code | safe }}" alt="QR Code">
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 
 <script>
+const graphData = {{ graph_data | tojson }};
+
+const nodes = new vis.DataSet(graphData.nodes.map(n => {
+  let color = "#6b7280";
+  let shape = "dot";
+
+  if (n.group === "sample") {
+    color = "#111827";
+  } else if (n.group === "person") {
+    color = "#2563eb";
+  } else if (n.group === "event") {
+    color = "#9ca3af";
+  } else if (n.group === "action") {
+    color = "#10b981";
+  } else if (n.group === "composition") {
+    color = "#f59e0b";
+  } else if (n.group === "project") {
+    color = "#8b5cf6";
+  } else if (n.group === "instrument") {
+    color = "#ef4444";
+  } else if (n.group === "location") {
+    color = "#06b6d4";
+  }
+
+  return {
+    ...n,
+    color: color,
+    shape: shape,
+    font: {
+      size: n.size >= 18 ? 18 : 12,
+      color: "#111827"
+    }
+  };
+}));
+
+const edges = new vis.DataSet(graphData.edges.map(e => ({
+  ...e,
+  color: {
+    color: "#9ca3af",
+    opacity: 0.55
+  },
+  font: {
+    size: 9,
+    color: "#6b7280"
+  },
+  smooth: {
+    type: "continuous"
+  }
+})));
+
+const container = document.getElementById("network");
+
+const options = {
+  nodes: {
+    borderWidth: 0,
+    scaling: {
+      min: 4,
+      max: 32
+    }
+  },
+
+  edges: {
+    width: 1,
+    arrows: {
+      to: {
+        enabled: false
+      }
+    }
+  },
+
+  physics: {
+    enabled: true,
+    solver: "forceAtlas2Based",
+    forceAtlas2Based: {
+      gravitationalConstant: -80,
+      centralGravity: 0.01,
+      springLength: 130,
+      springConstant: 0.05,
+      damping: 0.65,
+      avoidOverlap: 0.4
+    },
+    stabilization: {
+      enabled: true,
+      iterations: 800
+    }
+  },
+
+  interaction: {
+    hover: true,
+    tooltipDelay: 120,
+    hideEdgesOnDrag: false,
+    navigationButtons: true,
+    keyboard: true
+  }
+};
+
+const network = new vis.Network(container, { nodes, edges }, options);
+
+network.on("doubleClick", function(params) {
+  if (params.nodes.length > 0) {
+    const node = nodes.get(params.nodes[0]);
+    if (node.link) {
+      window.open(node.link, "_blank");
+    }
+  }
+});
+
 function toggleBody(id) {
   const el = document.getElementById(id);
   el.style.display = el.style.display === "none" ? "table-row" : "none";
 }
 
-function toggleQR(id) {
-  const el = document.getElementById(id);
-  el.style.display = el.style.display === "none" ? "table-row" : "none";
+function getSelectedExtraFields() {
+  return Array.from(document.querySelectorAll(".extra-field-checkbox"))
+    .filter(cb => cb.checked)
+    .map(cb => cb.value);
+}
+
+function updateExtraFieldVisibility() {
+  const selected = new Set(getSelectedExtraFields());
+
+  document.querySelectorAll(".extra-col").forEach(cell => {
+    const field = cell.dataset.field;
+    cell.style.display = selected.has(field) ? "" : "none";
+  });
+}
+
+function selectAllExtraFields() {
+  document.querySelectorAll(".extra-field-checkbox").forEach(cb => {
+    cb.checked = true;
+  });
+  updateExtraFieldVisibility();
+}
+
+function clearAllExtraFields() {
+  document.querySelectorAll(".extra-field-checkbox").forEach(cb => {
+    cb.checked = false;
+  });
+  updateExtraFieldVisibility();
+}
+
+function selectCommonExtraFields() {
+  document.querySelectorAll(".extra-field-checkbox").forEach(cb => {
+    cb.checked = cb.dataset.defaultCore === "true";
+  });
+
+  updateExtraFieldVisibility();
+}
+
+function filterExtraFieldList() {
+  const query = document.getElementById("field-search").value.toLowerCase();
+
+  document.querySelectorAll(".field-item").forEach(item => {
+    const name = item.dataset.fieldName;
+    item.style.display = name.includes(query) ? "" : "none";
+  });
 }
 
 function sortTable(colIndex, thElement) {
   const table = document.getElementById("result-table");
   const tbody = table.querySelector("tbody");
+
   const dataRows = Array.from(tbody.querySelectorAll("tr.data-row"));
-
   const isAsc = !thElement.classList.contains("asc");
-  table.dataset.sortOrder = isAsc ? "asc" : "desc";
 
-  document.querySelectorAll("th").forEach(th => th.classList.remove("asc", "desc"));
+  table.querySelectorAll("th").forEach(th => th.classList.remove("asc", "desc"));
   thElement.classList.add(isAsc ? "asc" : "desc");
 
   dataRows.sort((a, b) => {
     const A = a.children[colIndex]?.innerText.trim() || "";
     const B = b.children[colIndex]?.innerText.trim() || "";
+
     return A.localeCompare(B, undefined, { numeric: true }) * (isAsc ? 1 : -1);
   });
 
   tbody.innerHTML = "";
+
   for (const row of dataRows) {
     const id = row.children[0].innerText.trim();
     const bodyRow = document.getElementById("body" + id);
     const qrRow = document.getElementById("qr" + id);
-    tbody.append(row);
-    if (bodyRow) tbody.append(bodyRow);
-    if (qrRow) tbody.append(qrRow);
+
+    tbody.appendChild(row);
+    if (bodyRow) tbody.appendChild(bodyRow);
+    if (qrRow) tbody.appendChild(qrRow);
   }
 }
+
+document.addEventListener("DOMContentLoaded", updateExtraFieldVisibility);
 </script>
+
+{% else %}
+
+<div class="section">
+  <p>No matching records found.</p>
+</div>
+
+{% endif %}
 
 </body>
 </html>
