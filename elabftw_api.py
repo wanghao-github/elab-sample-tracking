@@ -1,241 +1,472 @@
-import json
 import base64
-from io import BytesIO
+import io
+import re
+from typing import Any, Dict, List, Optional
 
-import elabapi_python
 import qrcode
-from bs4 import BeautifulSoup
-from flask import Flask, render_template
-
-my_api_key = "your_api_key_here"
-configuration = elabapi_python.Configuration()
-configuration.api_key["api_key"] = my_api_key
-configuration.api_key_prefix["api_key"] = "Authorization"
-configuration.host = "https://your-elab-url/api/v2/items"
-configuration.debug = False
-configuration.verify_ssl = False
-
-api_client = elabapi_python.ApiClient(configuration)
-api_client.set_default_header(header_name="Authorization", header_value=my_api_key)
-items = elabapi_python.ItemsApi(api_client)
-experiments_api = elabapi_python.ExperimentsApi(api_client)
-
-app = Flask(__name__)
 
 
-def get_extra_field(metadata, field):
-    if not metadata:
+def normalize_text(value: Any) -> str:
+    """Convert a value to a clean string."""
+    if value is None:
         return ""
+    return str(value).strip()
 
-    try:
-        parsed = json.loads(metadata) if isinstance(metadata, str) else metadata
-        fields = parsed.get("extra_fields", {})
-        if field in fields:
-            value = fields[field].get("value", "")
-            if isinstance(value, list):
-                return " ".join(v.strip() for v in value if v)
-            if isinstance(value, str):
-                return value.strip()
-            return str(value)
-    except Exception:
-        pass
+
+def generate_qr_code_data_url(url: str) -> str:
+    """Generate a QR code as a base64 data URL."""
+    img = qrcode.make(url)
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{encoded}"
+
+
+def extract_extra_fields(record: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract user-defined eLabFTW extra fields.
+
+    eLabFTW stores custom metadata in different structures depending on the
+    server version and template configuration. This function tries to support
+    common layouts, including grouped metadata such as SSL_Metadata.
+    """
+    extra_info = {}
+
+    metadata = record.get("metadata")
+    if not metadata:
+        return extra_info
+
+    if isinstance(metadata, str):
+        import json
+        try:
+            metadata = json.loads(metadata)
+        except Exception:
+            return extra_info
+
+    extra_fields = metadata.get("extra_fields", {})
+
+    if not isinstance(extra_fields, dict):
+        return extra_info
+
+    for key, value in extra_fields.items():
+        if isinstance(value, dict):
+            if "value" in value:
+                extra_info[key] = value.get("value", "")
+            elif "extra_fields" in value:
+                nested = value.get("extra_fields", {})
+                if isinstance(nested, dict):
+                    for nested_key, nested_value in nested.items():
+                        if isinstance(nested_value, dict):
+                            extra_info[nested_key] = nested_value.get("value", "")
+                        else:
+                            extra_info[nested_key] = nested_value
+            else:
+                for nested_key, nested_value in value.items():
+                    if isinstance(nested_value, dict) and "value" in nested_value:
+                        extra_info[nested_key] = nested_value.get("value", "")
+        else:
+            extra_info[key] = value
+
+    return extra_info
+
+
+def find_sample_id(record: Dict[str, Any]) -> str:
+    """
+    Try to find a Sample ID from extra fields, custom_id, title, or body.
+    """
+    extra_info = extract_extra_fields(record)
+
+    possible_keys = [
+        "Sample-ID",
+        "Sample ID",
+        "SampleId",
+        "Sample",
+        "sample_id",
+    ]
+
+    for key in possible_keys:
+        value = normalize_text(extra_info.get(key))
+        if value:
+            return value
+
+    custom_id = normalize_text(record.get("custom_id"))
+    if custom_id:
+        return custom_id
+
+    title = normalize_text(record.get("title"))
+    body = normalize_text(record.get("body"))
+    text = f"{title} {body}"
+
+    patterns = [
+        r"\bMB\d?-\d{3,5}\b",
+        r"\bMB-\d{3,5}\b",
+        r"\bMB\d-\d{3,5}\b",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(0)
 
     return ""
 
 
-def sample_id_matches_field(sample_id_input, sample_id_field):
-    sample_id_input = sample_id_input.strip().lower()
-    return any(
-        sid.strip().lower().startswith(sample_id_input)
-        for sid in sample_id_field.split()
-    )
+def record_matches_sample_id(
+    sample_id: str,
+    record: Dict[str, Any],
+    full_text: bool = False,
+) -> bool:
+    """Check whether an eLabFTW record matches the requested Sample ID."""
+    if not sample_id:
+        return True
+
+    sample_id_lower = sample_id.lower()
+
+    extracted_sample_id = find_sample_id(record)
+    if sample_id_lower in extracted_sample_id.lower():
+        return True
+
+    title = normalize_text(record.get("title"))
+    custom_id = normalize_text(record.get("custom_id"))
+
+    if sample_id_lower in title.lower():
+        return True
+
+    if sample_id_lower in custom_id.lower():
+        return True
+
+    if full_text:
+        body = normalize_text(record.get("body"))
+        metadata = normalize_text(record.get("metadata"))
+        combined = f"{title} {custom_id} {body} {metadata}".lower()
+        return sample_id_lower in combined
+
+    return False
 
 
-def generate_qr_code_data_url(link):
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=6,
-        border=2,
-    )
-    qr.add_data(link)
-    qr.make(fit=True)
+def generate_summary_rows_by_sample_id_full_text(
+    sample_id: str,
+    data: List[Dict[str, Any]],
+    base_url: str,
+    full_text: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Convert matching eLabFTW records into rows used by the HTML templates.
+    """
+    rows = []
 
-    img = qr.make_image(fill_color="black", back_color="white")
-    buffered = BytesIO()
-    img.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return f"data:image/png;base64,{img_str}"
-
-
-def generate_summary_rows_by_sample_id_full_text(sample_id, data, base_url, full_text=False):
-    important_extra_fields = [
-        "Sample Type",
-        "Experiment Performed",
-        "Sample Composition",
-        "CRC-Project",
-    ]
-
-    summary_rows = []
-    sample_id_lower = sample_id.strip().lower()
-
-    for item in data:
-        metadata = item.get("metadata", {})
-        title = item.get("title", "") or ""
-        body = item.get("body", "") or ""
-        sample_id_field = get_extra_field(metadata, "Sample-ID").strip()
-        body_fixed = item.get("body") or ""
-
-        sample_id_tokens = [sid.strip().lower() for sid in sample_id_field.split()]
-
-        matched = False
-        match_source = ""
-
-        if full_text:
-            if sample_id_lower in title.lower():
-                matched = True
-                match_source = "title"
-            elif sample_id_lower in body.lower():
-                matched = True
-                match_source = "body"
-            elif any(sid.startswith(sample_id_lower) for sid in sample_id_tokens):
-                matched = True
-                match_source = "Sample-ID"
-        else:
-            if any(sid.startswith(sample_id_lower) for sid in sample_id_tokens):
-                matched = True
-                match_source = "Sample-ID"
-
-        if not matched:
+    for record in data:
+        if not record_matches_sample_id(sample_id, record, full_text=full_text):
             continue
 
-        extra_info = {
-            field: get_extra_field(metadata, field)
-            for field in important_extra_fields
-        }
-        link = base_url + str(item["id"])
+        record_id = record.get("id")
+        link = f"{base_url}{record_id}"
+
+        extra_info = extract_extra_fields(record)
+        extracted_sample_id = find_sample_id(record)
 
         row = {
-            "id": item.get("id"),
-            "title": item.get("title", "N/A"),
-            "fullname": item.get("fullname", "N/A"),
-            "created_at": item.get("created_at", "N/A"),
-            "category_id": item.get("category_id", "N/A"),
-            "custom_id": item.get("custom_id", "N/A"),
-            "sample_id": sample_id_field,
+            "id": record_id,
+            "sample_id": extracted_sample_id or sample_id,
+            "title": record.get("title", ""),
+            "fullname": record.get("fullname", ""),
+            "created_at": record.get("created_at", ""),
+            "modified_at": record.get("modified_at", ""),
+            "body": record.get("body", ""),
             "link": link,
-            "body_html": item.get("body_html", ""),
-            "body": body_fixed,
-            "extra_info": extra_info,
-            "match_source": match_source,
             "qr_code": generate_qr_code_data_url(link),
+            "extra_info": extra_info,
+            "match_source": "full_text" if full_text else "metadata_or_title",
         }
 
-        summary_rows.append(row)
+        rows.append(row)
 
-    return summary_rows
+    return rows
 
 
-def generate_summary_rows_by_sample_id_full_texti_1(sample_id, data, base_url, full_text=False):
-    important_extra_fields = [
-        "Sample Type",
-        "Temperature",
-        "Sample Composition",
-        "CRC-Project",
+def save_summary_as_item(items_api, sample_id: str, summary_rows: List[Dict[str, Any]]) -> Optional[int]:
+    """
+    Save the current search result as a new eLabFTW item.
+
+    The exact fields accepted by eLabFTW may depend on the server setup.
+    """
+    body_lines = [
+        f"<h2>Sample history summary for {sample_id}</h2>",
+        "<table border='1' cellpadding='5' cellspacing='0'>",
+        "<tr><th>ID</th><th>Created At</th><th>Created By</th><th>Title</th><th>Link</th></tr>",
     ]
 
-    summary_rows = []
-    sample_id_lower = sample_id.strip().lower()
-
-    for item in data:
-        metadata = item.get("metadata", {})
-        title = item.get("title", "")
-        body = item.get("body", "")
-        sample_id_field = get_extra_field(metadata, "Sample-ID").strip()
-
-        matched = False
-        match_source = ""
-
-        if full_text:
-            if sample_id_lower in title.lower():
-                matched = True
-                match_source = "title"
-            elif sample_id_lower in body.lower():
-                matched = True
-                match_source = "body"
-            elif sample_id_matches_field(sample_id_lower, sample_id_field):
-                matched = True
-                match_source = "Sample-ID"
-        else:
-            if sample_id_matches_field(sample_id_lower, sample_id_field):
-                matched = True
-                match_source = "Sample-ID"
-
-        if not matched:
-            continue
-
-        extra_info = {
-            field: get_extra_field(metadata, field)
-            for field in important_extra_fields
-        }
-        link = base_url + str(item["id"])
-
-        summary_rows.append(
-            {
-                "id": item.get("id"),
-                "title": title,
-                "fullname": item.get("fullname", "N/A"),
-                "created_at": item.get("created_at", "N/A"),
-                "category_id": item.get("category_id", "N/A"),
-                "custom_id": item.get("custom_id", "N/A"),
-                "sample_id": sample_id_field,
-                "link": link,
-                "body_html": fix_image_paths(item.get("body_html", ""), base_url),
-                "body": fix_image_paths(item.get("body", ""), base_url),
-                "extra_info": extra_info,
-                "match_source": match_source,
-                "qr_code": generate_qr_code_data_url(link),
-            }
+    for row in summary_rows:
+        body_lines.append(
+            "<tr>"
+            f"<td>{row.get('id')}</td>"
+            f"<td>{row.get('created_at')}</td>"
+            f"<td>{row.get('fullname')}</td>"
+            f"<td>{row.get('title')}</td>"
+            f"<td><a href='{row.get('link')}'>Open</a></td>"
+            "</tr>"
         )
 
-    return summary_rows
-
-
-def save_summary_as_item(items_api, sample_id, summary_rows):
-    title = f"{sample_id} summary"
-    html_table = render_template("summary_body.html", rows=summary_rows)
+    body_lines.append("</table>")
+    body_html = "\n".join(body_lines)
 
     response = items_api.post_item_with_http_info(
         body={
-            "title": title,
-            "category_id": 2,
-            "tags": ["summary"],
-            "body": "<h1>Section title</h1><p>Main text of resource</p>",
+            "category_id": 1,
+            "tags": ["sample-tracking", sample_id],
         }
     )
 
     location = response[2].get("Location")
-    item_id = int(location.split("/").pop())
+    if not location:
+        return None
 
-    items_api.patch_item_with_http_info(item_id, body={"body": html_table})
-    return item_id
+    new_item_id = int(location.split("/").pop())
+
+    items_api.patch_item_with_http_info(
+        new_item_id,
+        body={
+            "title": f"Sample history summary: {sample_id}",
+            "body": body_html,
+        },
+    )
+
+    return new_item_id
 
 
-def fix_image_src_by_uploads(body, uploads):
-    soup = BeautifulSoup(body, "html.parser")
-    base_url = "https://wanghao93.xyz"
+def infer_action(row: Dict[str, Any]) -> str:
+    """Infer the experimental action from extra fields or the title."""
+    extra = row.get("extra_info") or {}
+    title = normalize_text(row.get("title"))
+    lower = title.lower()
 
-    for img in soup.find_all("img"):
-        src = img.get("src", "")
-        for up in uploads:
-            real_name = up.get("real_name")
-            long_name = up.get("long_name")
-            storage = up.get("storage", 1)
-            prefix = long_name[:2]
+    preferred_keys = [
+        "Experiment Performed",
+        "Experiment",
+        "Measurement",
+        "Method",
+        "Technique",
+        "Action",
+        "Process",
+        "Characterization",
+    ]
 
-            if real_name in src or long_name in src:
-                new_src = f"{base_url}/app/download.php?f={prefix}/{long_name}&storage={storage}"
-                img["src"] = new_src
-                break
+    for key in preferred_keys:
+        value = normalize_text(extra.get(key))
+        if value:
+            return value
 
-    return str(soup)
+    rules = [
+        ("xps", "XPS"),
+        ("xas", "XAS"),
+        ("xrd", "XRD"),
+        ("raman", "Raman"),
+        ("sem", "SEM"),
+        ("tem", "TEM"),
+        ("transport", "Transport"),
+        ("hall", "Hall measurement"),
+        ("sinter", "Sintering"),
+        ("furnace", "Furnace treatment"),
+        ("anneal", "Annealing"),
+        ("synthesis", "Synthesis"),
+        ("pechini", "Pechini synthesis"),
+        ("growth", "Growth"),
+    ]
+
+    for keyword, action in rules:
+        if keyword in lower:
+            return action
+
+    return "Record"
+
+
+def get_extra_value(row: Dict[str, Any], keys: List[str]) -> str:
+    """Return the first non-empty value from a list of possible extra-field keys."""
+    extra = row.get("extra_info") or {}
+
+    for key in keys:
+        value = normalize_text(extra.get(key))
+        if value:
+            return value
+
+    return ""
+
+
+def collect_extra_field_names(rows: List[Dict[str, Any]]) -> List[str]:
+    """
+    Collect all custom extra-field names appearing in all matching records.
+
+    This is important because different eLabFTW entries may use different
+    templates or custom metadata fields.
+    """
+    field_names = set()
+
+    for row in rows:
+        extra = row.get("extra_info") or {}
+        for key in extra.keys():
+            field_names.add(key)
+
+    priority = [
+        "Sample Type",
+        "Experiment Performed",
+        "Sample Composition",
+        "CRC-Project",
+        "Project",
+        "Instrument",
+        "Location",
+        "Temperature",
+        "Pressure",
+    ]
+
+    priority_existing = [key for key in priority if key in field_names]
+    remaining = sorted(field_names - set(priority_existing), key=str.lower)
+
+    return priority_existing + remaining
+
+
+def build_timeline_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Build chronological rows for the sample history timeline."""
+    timeline = []
+
+    for row in rows:
+        timeline.append(
+            {
+                "id": row.get("id"),
+                "sample_id": row.get("sample_id", ""),
+                "title": row.get("title", ""),
+                "person": row.get("fullname", "Unknown"),
+                "created_at": row.get("created_at", ""),
+                "action": infer_action(row),
+                "composition": get_extra_value(row, ["Sample Composition", "Composition"]),
+                "sample_type": get_extra_value(row, ["Sample Type", "Type"]),
+                "project": get_extra_value(row, ["CRC-Project", "Project"]),
+                "link": row.get("link", ""),
+            }
+        )
+
+    return sorted(timeline, key=lambda r: r.get("created_at", ""))
+
+
+def build_transfer_graph(
+    rows: List[Dict[str, Any]],
+    query: str,
+    graph_center: str = "sample",
+) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Build graph data for visualizing sample provenance and contributor records.
+    """
+    nodes = []
+    edges = []
+    node_ids = set()
+    edge_ids = set()
+
+    def add_node(node_id: str, label: str, group: str, size: int = 8, link: Optional[str] = None):
+        if not label:
+            return
+
+        if node_id not in node_ids:
+            node = {
+                "id": node_id,
+                "label": label,
+                "group": group,
+                "size": size,
+            }
+
+            if link:
+                node["link"] = link
+
+            nodes.append(node)
+            node_ids.add(node_id)
+
+    def add_edge(source: str, target: str, label: str = ""):
+        if not source or not target:
+            return
+
+        edge_id = f"{source}::{target}::{label}"
+        if edge_id not in edge_ids:
+            edges.append(
+                {
+                    "from": source,
+                    "to": target,
+                    "label": label,
+                }
+            )
+            edge_ids.add(edge_id)
+
+    center_id = f"center::{query}"
+    center_group = "sample" if graph_center == "sample" else "person"
+    add_node(center_id, query, center_group, size=30)
+
+    previous_event_id = None
+
+    for i, row in enumerate(sorted(rows, key=lambda r: r.get("created_at", ""))):
+        row_id = row.get("id", i)
+        sample_id = normalize_text(row.get("sample_id")) or query
+        person = normalize_text(row.get("fullname")) or "Unknown"
+        created_at = normalize_text(row.get("created_at"))
+        action = infer_action(row)
+        link = row.get("link", "")
+
+        sample_node = f"sample::{sample_id}"
+        person_node = f"person::{person}"
+        action_node = f"action::{action}"
+        event_node = f"event::{row_id}"
+
+        event_label = f"{created_at}\n{action}"
+
+        add_node(sample_node, sample_id, "sample", size=20)
+        add_node(person_node, person, "person", size=18)
+        add_node(action_node, action, "action", size=13)
+        add_node(event_node, event_label, "event", size=9, link=link)
+
+        if graph_center == "sample":
+            add_edge(center_id, person_node, "handled by")
+            add_edge(person_node, event_node, "performed")
+            add_edge(event_node, action_node, "type")
+            add_edge(event_node, sample_node, "record of")
+        else:
+            add_edge(center_id, sample_node, "worked on")
+            add_edge(sample_node, event_node, "has event")
+            add_edge(event_node, action_node, "type")
+            add_edge(person_node, event_node, "performed")
+
+        if previous_event_id:
+            add_edge(previous_event_id, event_node, "next")
+
+        previous_event_id = event_node
+
+        composition = get_extra_value(row, ["Sample Composition", "Composition"])
+        sample_type = get_extra_value(row, ["Sample Type", "Type"])
+        project = get_extra_value(row, ["CRC-Project", "Project"])
+        instrument = get_extra_value(row, ["Instrument", "Device", "Equipment"])
+        location = get_extra_value(row, ["Location", "Lab", "Facility", "Institute"])
+
+        if composition:
+            comp_node = f"composition::{composition}"
+            add_node(comp_node, composition, "composition", size=10)
+            add_edge(sample_node, comp_node, "composition")
+
+        if sample_type:
+            type_node = f"type::{sample_type}"
+            add_node(type_node, sample_type, "sample_type", size=10)
+            add_edge(sample_node, type_node, "type")
+
+        if project:
+            project_node = f"project::{project}"
+            add_node(project_node, project, "project", size=12)
+            add_edge(sample_node, project_node, "project")
+
+        if instrument:
+            instrument_node = f"instrument::{instrument}"
+            add_node(instrument_node, instrument, "instrument", size=10)
+            add_edge(event_node, instrument_node, "instrument")
+
+        if location:
+            location_node = f"location::{location}"
+            add_node(location_node, location, "location", size=10)
+            add_edge(event_node, location_node, "location")
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+    }
